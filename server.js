@@ -10,9 +10,11 @@ const express = require('express');
 const cors    = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode  = require('qrcode-terminal');
+const QRCode  = require('qrcode');
 const fs      = require('fs');
 const path    = require('path');
 
+let lastQR = '';
 // ============================================================
 // SECTION 1: CONFIGURATION
 // ============================================================
@@ -693,6 +695,7 @@ const client = new Client({
 });
 
 client.on('qr', (qr) => {
+    lastQR = qr;
     console.log('\n📌 امسح QR Code للاتصال بـ WhatsApp:\n');
     qrcode.generate(qr, { small: true });
 });
@@ -1086,6 +1089,18 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
+// ── GET /qr ──────────────────────────────────────────────
+app.get('/qr', async (req, res) => {
+    if (!lastQR) return res.send('<h2 style="font-family:sans-serif">✅ واتساب متصل بالفعل أو لم يبدأ بعد</h2>');
+    const imgData = await QRCode.toDataURL(lastQR);
+    res.send(`<html><body style="text-align:center;background:#111;padding:40px">
+        <h2 style="color:white;font-family:sans-serif">امسح QR للاتصال بواتساب</h2>
+        <img src="${imgData}" style="width:300px;border-radius:10px"/>
+        <p style="color:gray;font-family:sans-serif">تحديث تلقائي كل 30 ثانية</p>
+        <script>setTimeout(()=>location.reload(),30000)</script>
+    </body></html>`);
+});
+
 // ── GET / ────────────────────────────────────────────────
 app.get('/', (req, res) => {
     const stats = SubscriptionManager.stats();
@@ -1099,7 +1114,6 @@ app.get('/', (req, res) => {
         subscriptions: stats,
     });
 });
-
 // ── POST /api/sync ───────────────────────────────────────
 app.post('/api/sync', (req, res) => {
     const { vehicles } = req.body;
