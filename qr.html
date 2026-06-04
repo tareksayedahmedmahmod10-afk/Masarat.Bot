@@ -4,18 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WhatsApp QR</title>
-    <style>
-        body { background:#fff; text-align:center; padding:40px; font-family:sans-serif; }
-        img { width:500px; height:500px; border:2px solid #ccc; border-radius:10px; }
-        h2 { color:#333; }
-        p { color:gray; }
-    </style>
 </head>
-<body>
+<body style="text-align:center;background:#fff;padding:40px;font-family:sans-serif">
     <h2>امسح QR للاتصال بواتساب</h2>
-    <img id="qr" src="/qr-image" />
-    <p>تحديث تلقائي كل 20 ثانية</p>
+    <img src="/qr-image" style="width:400px;height:400px"/>
+    <p style="color:gray">تحديث تلقائي كل 20 ثانية</p>
     <script>setTimeout(()=>location.reload(), 20000)</script>
 </body>
 </html>
-
