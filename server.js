@@ -688,25 +688,41 @@ const BotMsg = {
 
 const SESSION_PATH = '/app/.wwebjs_auth';
 
-// امسح كل SingletonLock في أي subfolder
-try {
-    const dirs = fs.readdirSync(SESSION_PATH);
-    for (const dir of dirs) {
-        const lockFile = path.join(SESSION_PATH, dir, 'SingletonLock');
-        if (fs.existsSync(lockFile)) {
-            fs.unlinkSync(lockFile);
-            console.log(`🧹 تم حذف SingletonLock: ${lockFile}`);
+// ── Startup: clear stale Chromium lock files ─────────────────
+// Chromium writes several lock files that survive a crash and
+// prevent the next launch from starting ("browser already running").
+// We remove them unconditionally on every startup so a clean
+// browser process can always be created.
+function clearSessionLocks() {
+    const LOCK_FILES = [
+        'SingletonLock',
+        'SingletonCookie',
+        'DevToolsActivePort',
+    ];
+    try {
+        const dirs = fs.readdirSync(SESSION_PATH);
+        for (const dir of dirs) {
+            for (const lockName of LOCK_FILES) {
+                // Top-level session dir
+                const lockFile = path.join(SESSION_PATH, dir, lockName);
+                if (fs.existsSync(lockFile)) {
+                    fs.unlinkSync(lockFile);
+                    console.log(`🧹 Removed stale lock: ${lockFile}`);
+                }
+                // Default profile sub-dir
+                const defaultLock = path.join(SESSION_PATH, dir, 'Default', lockName);
+                if (fs.existsSync(defaultLock)) {
+                    fs.unlinkSync(defaultLock);
+                    console.log(`🧹 Removed stale lock: ${defaultLock}`);
+                }
+            }
         }
-        // امسح كمان lock files جوه Default folder
-        const defaultLock = path.join(SESSION_PATH, dir, 'Default', 'SingletonLock');
-        if (fs.existsSync(defaultLock)) {
-            fs.unlinkSync(defaultLock);
-            console.log(`🧹 تم حذف SingletonLock: ${defaultLock}`);
-        }
+    } catch (err) {
+        console.log('⚠️ SESSION_PATH not found or empty — skipping lock cleanup');
     }
-} catch (err) {
-    console.log('⚠️ SESSION_PATH مش موجود بعد أو فاضي — تمام');
 }
+
+clearSessionLocks();
 
 const client = new Client({
     authStrategy: new LocalAuth({
@@ -726,6 +742,59 @@ const client = new Client({
         ],
     },
 });
+
+// ── WhatsApp lifecycle events ─────────────────────────────────
+
+client.on('qr', (qr) => {
+    lastQR = qr;
+    qrcode.generate(qr, { small: true });
+    log('📱 QR code generated — scan to authenticate');
+});
+
+client.on('ready', () => {
+    isWhatsAppReady = true;
+    lastQR = '';
+    log('✅ WhatsApp client ready');
+});
+
+client.on('auth_failure', (msg) => {
+    log('❌ WhatsApp auth failure:', msg);
+    isWhatsAppReady = false;
+});
+
+client.on('disconnected', async (reason) => {
+    log(`⚠️ WhatsApp disconnected: ${reason}`);
+    isWhatsAppReady = false;
+    // Fully tear down the browser before attempting a fresh init,
+    // otherwise Puppeteer will find the old userDataDir still locked.
+    try { await client.destroy(); } catch (_) {}
+    clearSessionLocks();
+    log('🔄 Scheduling reconnect in 10 s...');
+    setTimeout(() => initializeClient(), 10_000);
+});
+
+// ── Initializer with exponential-backoff retry ────────────────
+
+async function initializeClient(attempt = 1) {
+    const MAX_ATTEMPTS = 5;
+    const BASE_DELAY_MS = 5_000; // 5 s → 10 s → 20 s → 40 s → 80 s
+
+    try {
+        log(`🚀 Initializing WhatsApp client (attempt ${attempt}/${MAX_ATTEMPTS})...`);
+        clearSessionLocks();
+        await client.initialize();
+    } catch (err) {
+        log(`❌ client.initialize() failed (attempt ${attempt}): ${err.message}`);
+        if (attempt >= MAX_ATTEMPTS) {
+            log('🛑 Max initialization attempts reached. Exiting so Railway can restart.');
+            process.exit(1);
+        }
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        log(`⏳ Retrying in ${delay / 1000} s...`);
+        await sleep(delay);
+        await initializeClient(attempt + 1);
+    }
+}
 
 // ============================================================
 // SECTION 8: BOT HANDLER
@@ -1414,13 +1483,19 @@ app.post('/request', async (req, res) => {
 
 // تحميل الاشتراكات المحفوظة عند البدء
 SubscriptionManager.load();
-// Graceful shutdown عشان Railway
-process.on('SIGTERM', async () => {
-    console.log('🛑 SIGTERM — جاري الإيقاف...');
+
+// ── Graceful shutdown (Railway sends SIGTERM; Ctrl-C sends SIGINT) ──
+async function gracefulShutdown(signal) {
+    console.log(`🛑 ${signal} received — shutting down gracefully...`);
+    isWhatsAppReady = false;
     try { await client.destroy(); } catch (_) {}
     process.exit(0);
-});
-client.initialize();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
+// Start the WhatsApp client with retry logic
+initializeClient();
 
 app.listen(CONFIG.PORT, () => {
     const stats = SubscriptionManager.stats();
