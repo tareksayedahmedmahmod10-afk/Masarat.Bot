@@ -1090,15 +1090,24 @@ app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
 // ── GET /qr ──────────────────────────────────────────────
-app.get('/qr', async (req, res) => {
-    if (!lastQR) return res.send('<h2 style="font-family:sans-serif">✅ واتساب متصل بالفعل أو لم يبدأ بعد</h2>');
-    const imgData = await QRCode.toDataURL(lastQR);
-    res.send(`<html><body style="text-align:center;background:#111;padding:40px">
-        <h2 style="color:white;font-family:sans-serif">امسح QR للاتصال بواتساب</h2>
-        <img src="${imgData}" style="width:300px;border-radius:10px"/>
-        <p style="color:gray;font-family:sans-serif">تحديث تلقائي كل 30 ثانية</p>
-        <script>setTimeout(()=>location.reload(),30000)</script>
-    </body></html>`);
+app.get('/qr', (req, res) => {
+    res.sendFile(path.join(__dirname, 'qr.html'));
+});
+
+app.get('/qr-image', async (req, res) => {
+    if (!lastQR) return res.status(404).send('no QR');
+
+    const imgData = await QRCode.toDataURL(lastQR, {
+        width: 500,
+        margin: 3,
+        color: { dark: '#000000', light: '#ffffff' },
+    });
+
+    const base64 = imgData.replace('data:image/png;base64,', '');
+    const img = Buffer.from(base64, 'base64');
+
+    res.setHeader('Content-Type', 'image/png');
+    res.send(img);
 });
 
 // ── GET / ────────────────────────────────────────────────
