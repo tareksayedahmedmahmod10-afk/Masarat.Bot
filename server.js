@@ -688,24 +688,14 @@ const BotMsg = {
 
 const SESSION_PATH = '/app/.wwebjs_auth';
 
-// امسح كل SingletonLock في أي subfolder
+// امسح الـ session folder كله عشان نبدأ نظيف
 try {
-    const dirs = fs.readdirSync(SESSION_PATH);
-    for (const dir of dirs) {
-        const lockFile = path.join(SESSION_PATH, dir, 'SingletonLock');
-        if (fs.existsSync(lockFile)) {
-            fs.unlinkSync(lockFile);
-            console.log(`🧹 تم حذف SingletonLock: ${lockFile}`);
-        }
-        // امسح كمان lock files جوه Default folder
-        const defaultLock = path.join(SESSION_PATH, dir, 'Default', 'SingletonLock');
-        if (fs.existsSync(defaultLock)) {
-            fs.unlinkSync(defaultLock);
-            console.log(`🧹 تم حذف SingletonLock: ${defaultLock}`);
-        }
+    if (fs.existsSync(SESSION_PATH)) {
+        fs.rmSync(SESSION_PATH, { recursive: true, force: true });
+        console.log('🧹 تم مسح session folder كامل');
     }
 } catch (err) {
-    console.log('⚠️ SESSION_PATH مش موجود بعد أو فاضي — تمام');
+    console.log('⚠️ مش قادر يمسح session:', err.message);
 }
 
 const client = new Client({
