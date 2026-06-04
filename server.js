@@ -686,30 +686,31 @@ const BotMsg = {
 // SECTION 7: WHATSAPP CLIENT
 // ============================================================
 
+// امسح SingletonLock لو موجود من run سابق
+const SESSION_PATH = '/app/.wwebjs_auth';
+const lockFile = path.join(SESSION_PATH, 'session', 'SingletonLock');
+if (fs.existsSync(lockFile)) {
+    fs.unlinkSync(lockFile);
+    console.log('🧹 تم حذف SingletonLock القديم');
+}
+
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        dataPath: SESSION_PATH,
+    }),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu',
+        ],
     },
-});
-
-client.on('qr', (qr) => {
-    lastQR = qr;
-    console.log('\n📌 امسح QR Code للاتصال بـ WhatsApp:\n');
-    qrcode.generate(qr, { small: true });
-});
-
-client.on('ready', () => {
-    console.log('✅ WhatsApp متصل وجاهز!');
-    isWhatsAppReady = true;
-});
-
-client.on('auth_failure', (msg) => console.error('❌ WhatsApp auth failure:', msg));
-
-client.on('disconnected', (reason) => {
-    console.log('❌ WhatsApp انقطع:', reason);
-    isWhatsAppReady = false;
 });
 
 // ============================================================
@@ -1399,7 +1400,12 @@ app.post('/request', async (req, res) => {
 
 // تحميل الاشتراكات المحفوظة عند البدء
 SubscriptionManager.load();
-
+// Graceful shutdown عشان Railway
+process.on('SIGTERM', async () => {
+    console.log('🛑 SIGTERM — جاري الإيقاف...');
+    try { await client.destroy(); } catch (_) {}
+    process.exit(0);
+});
 client.initialize();
 
 app.listen(CONFIG.PORT, () => {
