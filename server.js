@@ -688,7 +688,6 @@ const BotMsg = {
 
 const SESSION_PATH = '/app/.wwebjs_auth';
 
-// امسح SingletonLock بس (مش الـ session كله)
 function clearLocks(dir) {
     if (!fs.existsSync(dir)) return;
     try {
@@ -707,6 +706,29 @@ function clearLocks(dir) {
 }
 clearLocks(SESSION_PATH);
 
+// ✅ const client لازم يكون هنا
+const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: SESSION_PATH,
+    }),
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu',
+        ],
+    },
+});
+
+client.on('qr', (qr) => { ... });
+client.on('ready', () => { ... });
+// إلخ...
 // ============================================================
 // SECTION 8: BOT HANDLER
 // ============================================================
