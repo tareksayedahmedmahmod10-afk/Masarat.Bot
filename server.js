@@ -688,34 +688,24 @@ const BotMsg = {
 
 const SESSION_PATH = '/app/.wwebjs_auth';
 
-// امسح الـ session folder كله عشان نبدأ نظيف
-try {
-    if (fs.existsSync(SESSION_PATH)) {
-        fs.rmSync(SESSION_PATH, { recursive: true, force: true });
-        console.log('🧹 تم مسح session folder كامل');
+// امسح SingletonLock بس (مش الـ session كله)
+function clearLocks(dir) {
+    if (!fs.existsSync(dir)) return;
+    try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) clearLocks(fullPath);
+            else if (entry.name === 'SingletonLock' || entry.name === 'SingletonCookie') {
+                fs.unlinkSync(fullPath);
+                console.log(`🧹 حذف: ${fullPath}`);
+            }
+        }
+    } catch (err) {
+        console.log(`⚠️ clearLocks: ${err.message}`);
     }
-} catch (err) {
-    console.log('⚠️ مش قادر يمسح session:', err.message);
 }
-
-const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: SESSION_PATH,
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu',
-        ],
-    },
-});
+clearLocks(SESSION_PATH);
 
 // ============================================================
 // SECTION 8: BOT HANDLER
