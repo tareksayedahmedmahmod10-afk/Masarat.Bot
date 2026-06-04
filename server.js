@@ -686,12 +686,26 @@ const BotMsg = {
 // SECTION 7: WHATSAPP CLIENT
 // ============================================================
 
-// امسح SingletonLock لو موجود من run سابق
 const SESSION_PATH = '/app/.wwebjs_auth';
-const lockFile = path.join(SESSION_PATH, 'session', 'SingletonLock');
-if (fs.existsSync(lockFile)) {
-    fs.unlinkSync(lockFile);
-    console.log('🧹 تم حذف SingletonLock القديم');
+
+// امسح كل SingletonLock في أي subfolder
+try {
+    const dirs = fs.readdirSync(SESSION_PATH);
+    for (const dir of dirs) {
+        const lockFile = path.join(SESSION_PATH, dir, 'SingletonLock');
+        if (fs.existsSync(lockFile)) {
+            fs.unlinkSync(lockFile);
+            console.log(`🧹 تم حذف SingletonLock: ${lockFile}`);
+        }
+        // امسح كمان lock files جوه Default folder
+        const defaultLock = path.join(SESSION_PATH, dir, 'Default', 'SingletonLock');
+        if (fs.existsSync(defaultLock)) {
+            fs.unlinkSync(defaultLock);
+            console.log(`🧹 تم حذف SingletonLock: ${defaultLock}`);
+        }
+    }
+} catch (err) {
+    console.log('⚠️ SESSION_PATH مش موجود بعد أو فاضي — تمام');
 }
 
 const client = new Client({
