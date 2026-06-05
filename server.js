@@ -182,12 +182,10 @@ const SubscriptionManager = {
     getSubscribersForAlert(plate, alertType) {
         const exactKey = this._key(plate);
 
-        // 1) تطابق تام
         if (this._data[exactKey]?.[alertType]?.length > 0) {
             return this._data[exactKey][alertType];
         }
 
-        // 2) fuzzy match — لو صيغة اللوحة مختلفة بين الاشتراك والتنبيه
         for (const storedKey of Object.keys(this._data)) {
             if (storedKey === exactKey) continue;
             if (storedKey.includes(exactKey) || exactKey.includes(storedKey)) {
@@ -247,7 +245,6 @@ const SubscriptionManager = {
         return (this._data[k]?.['_keywords'] || []).filter(Boolean);
     },
 
-    // جلب كل الكلمات لجميع السيارات — للسكريبت عبر /api/keywords
     getAllKeywords() {
         const result = {};
         for (const [plateKey, data] of Object.entries(this._data)) {
@@ -257,7 +254,6 @@ const SubscriptionManager = {
         return result;
     },
 
-    // مسح كل اشتراكات فرع معين لسيارة معينة
     clearAllForBranch(plate, phone) {
         const k = this._key(plate);
         const p = cleanPhone(phone);
@@ -271,7 +267,6 @@ const SubscriptionManager = {
         this.save();
     },
 
-    // إحصائيات
     stats() {
         const plates = Object.keys(this._data).length;
         let totalSubs = 0;
@@ -358,10 +353,6 @@ const Sessions = {
     count() { return Object.keys(this._store).length; },
 };
 
-// ============================================================
-// SECTION 3: UTILS
-// ============================================================
-
 function normalize(str) {
     if (!str || typeof str !== 'string') return '';
     let s = str.toString().trim();
@@ -391,12 +382,7 @@ function buildMapsLink(lat, lng, addr) {
 function log(...args) { if (CONFIG.DEBUG) console.log('[MASARAT]', new Date().toLocaleTimeString('ar-SA'), ...args); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ============================================================
-// SECTION 4: PERMISSIONS
-// ============================================================
-
 const Permissions = {
-
     extractPhone(rawFrom) {
         if (!rawFrom) return null;
         const str = String(rawFrom);
@@ -472,12 +458,7 @@ const Permissions = {
     },
 };
 
-// ============================================================
-// SECTION 5: REPORT BUILDER
-// ============================================================
-
 const ReportBuilder = {
-
     buildTrackingReport(vehicle, branchName, trackLink) {
         const live      = vehicle.live      || vehicle;
         const excelData = vehicle.excelData || { branch:'---', status:'---', type:'---' };
@@ -590,12 +571,7 @@ const ReportBuilder = {
     },
 };
 
-// ============================================================
-// SECTION 6: BOT MESSAGES
-// ============================================================
-
 const BotMsg = {
-
     menu: (branchName) => [
         `🚗 *خدمة تتبع مسارات*`,
         `🏢 ${branchName}`,
@@ -620,7 +596,6 @@ const BotMsg = {
         return `🔍 أرسل *رقم لوحة السيارة* للاستعلام عن ${label}:\n\n_اكتب "إلغاء" للرجوع للقائمة_`;
     },
 
-    // ✅ v7.0: قائمة اختيار التنبيهات لسيارة معينة
     alertsMenu: (plate, activeAlerts) => {
         const lines = [
             `🔔 *إدارة تنبيهات اللوحة: ${plate}*`,
@@ -680,15 +655,20 @@ const BotMsg = {
         `❓ اختيار غير صحيح.\n\nأرسل رقماً من 1 إلى ${maxNum}\nأو *0* للرجوع\nأو *إلغاء* للخروج`,
 };
 
-// ============================================================
-// SECTION 7: WHATSAPP CLIENT
-// ============================================================
-
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/run/current-system/sw/bin/chromium',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+        ],
     },
 });
 
@@ -709,39 +689,27 @@ client.on('disconnected', (reason) => {
     isWhatsAppReady = false;
 });
 
-// ============================================================
-// SECTION 8: BOT HANDLER
-// ============================================================
-
 client.on('message', async (msg) => {
     try {
         if (msg.type !== 'chat') return;
 
         const text    = msg.body?.trim() || '';
 
-        // ✅ v7.1: لو الرسالة من نفسنا (fromMe)، نتحقق هل هي من رقم المشرف
-        // لما المشرف يكتب لنفسه في Saved Messages أو لأي شات، msg.from بيبقى رقمه
-        // ولكن msg.fromMe = true، فنسمح له فقط ونتجاهل باقي الرسايل اللي fromMe
         let rawFrom = msg.from;
 
         if (msg.fromMe) {
-            // نستخرج الرقم من msg.to (الرقم اللي بعته له) أو msg.from
-            // لما بتكتب لنفسك: msg.from = رقمك@c.us، msg.to = رقمك@c.us
             const selfPhone = cleanPhone(CONFIG.SUPERVISOR_PHONE);
             const fromPhone = cleanPhone((msg.from || '').replace(/@.+$/, ''));
             const toPhone   = cleanPhone((msg.to   || '').replace(/@.+$/, ''));
 
-            // نتأكد إن الرسالة دي من رقم المشرف أو لرقمه (Saved Messages)
             const isSupervisorSelf =
                 fromPhone === selfPhone ||
                 toPhone   === selfPhone ||
                 fromPhone.slice(-9) === selfPhone.slice(-9) ||
                 toPhone.slice(-9)   === selfPhone.slice(-9);
 
-            if (!isSupervisorSelf) return; // رسالة بعتها لحد تاني — تجاهل
+            if (!isSupervisorSelf) return;
 
-            // ✅ في حالة Saved Messages، msg.from بيبقى رقمه نفسه — تمام
-            // لو msg.from مش رقمه، نحطه يدوياً
             if (fromPhone !== selfPhone && fromPhone.slice(-9) !== selfPhone.slice(-9)) {
                 rawFrom = `${selfPhone}@c.us`;
             }
@@ -774,14 +742,12 @@ client.on('message', async (msg) => {
 
         let session = Sessions.get(sessionKey);
 
-        // إلغاء في أي وقت
         if (isCancel) {
             Sessions.destroy(sessionKey);
             await msg.reply(BotMsg.cancel());
             return;
         }
 
-        // مفيش جلسة → لازم كلمة التفعيل
         if (!session) {
             if (!isTrigger) {
                 log(`⏸ ${sessionKey} — تجاهل (لم يرسل كلمة التفعيل)`);
@@ -794,14 +760,12 @@ client.on('message', async (msg) => {
 
         Sessions.touch(sessionKey);
 
-        // إعادة القائمة لو أرسل "تتبع" وهو في جلسة
         if (isTrigger) {
             Sessions.setStep(sessionKey, 'MENU');
             await msg.reply(BotMsg.menu(branch.branchName));
             return;
         }
 
-        // ── القائمة الرئيسية ──────────────────────────────────
         if (session.step === 'MENU') {
             const choice = normText.replace(/[^1234]/g, '');
 
@@ -818,7 +782,6 @@ client.on('message', async (msg) => {
                 Sessions.destroy(sessionKey);
 
             } else if (choice === '4') {
-                // ✅ v7.0: إدارة تنبيهات السيارة
                 Sessions.setStep(sessionKey, 'ALERTS_PLATE');
                 await msg.reply(BotMsg.askPlate('alerts_setup'));
 
@@ -828,7 +791,6 @@ client.on('message', async (msg) => {
             return;
         }
 
-        // ── لوحة التتبع ──────────────────────────────────────
         if (session.step === 'TRACKING_PLATE') {
             if (!FleetState.isReady()) {
                 await msg.reply(BotMsg.noFleetData());
@@ -856,7 +818,6 @@ client.on('message', async (msg) => {
             return;
         }
 
-        // ── لوحة الزيت ───────────────────────────────────────
         if (session.step === 'OIL_PLATE') {
             if (!FleetState.isReady()) {
                 await msg.reply(BotMsg.noFleetData());
@@ -884,9 +845,6 @@ client.on('message', async (msg) => {
             return;
         }
 
-        // ============================================================
-        // ✅ v7.0: مرحلة إدخال اللوحة لإعداد التنبيهات
-        // ============================================================
         if (session.step === 'ALERTS_PLATE') {
             if (!FleetState.isReady()) {
                 await msg.reply(BotMsg.noFleetData());
@@ -909,7 +867,6 @@ client.on('message', async (msg) => {
                 return;
             }
 
-            // حفظ اللوحة في الجلسة والانتقال لخطوة اختيار التنبيه
             const plateKey = normalize(live.plate || text);
             const activeAlerts = SubscriptionManager.getSubscriptionsForBranch(plateKey, sessionKey);
 
@@ -923,38 +880,30 @@ client.on('message', async (msg) => {
             return;
         }
 
-        // ============================================================
-        // ✅ v7.0: مرحلة اختيار التنبيه (تفعيل / إيقاف)
-        // ============================================================
         if (session.step === 'ALERTS_MENU') {
             const plate    = session.alertsPlate    || '---';
             const plateKey = session.alertsPlateKey || '';
             const choiceRaw = normText.replace(/[^0-9]/g, '');
             const choice    = parseInt(choiceRaw, 10);
 
-            // 0 = رجوع للقائمة
             if (choice === 0) {
                 Sessions.setStep(sessionKey, 'MENU');
                 await msg.reply(BotMsg.menu(branch.branchName));
                 return;
             }
 
-            // إيقاف كل التنبيهات
             if (choice === ALERT_TYPES.length + 1) {
                 SubscriptionManager.clearAllForBranch(plateKey, sessionKey);
                 await msg.reply(BotMsg.allAlertsCleared(plate));
-                // نرجعه لقائمة التنبيهات نفسها بعد الإيقاف
                 const activeAlerts = SubscriptionManager.getSubscriptionsForBranch(plateKey, sessionKey);
                 await sleep(800);
                 await msg.reply(BotMsg.alertsMenu(plate, activeAlerts));
                 return;
             }
 
-            // اختيار تنبيه معين (1 → ALERT_TYPES.length)
             if (choice >= 1 && choice <= ALERT_TYPES.length) {
                 const alertType = ALERT_TYPES[choice - 1].key;
 
-                // ✅ v7.1: تنبيه الكلمات المفتاحية — يطلب من الفرع يكتب الكلمة
                 if (alertType === 'keyword_location') {
                     const existingKws = SubscriptionManager.getKeywords(plateKey);
                     const kwListText  = existingKws.length > 0
@@ -978,7 +927,6 @@ client.on('message', async (msg) => {
                     return;
                 }
 
-                // باقي أنواع التنبيهات — toggle عادي
                 const wasActive = SubscriptionManager.isSubscribed(plateKey, alertType, sessionKey);
                 let isNowActive;
                 if (wasActive) {
@@ -998,19 +946,14 @@ client.on('message', async (msg) => {
                 return;
             }
 
-            // اختيار غير صحيح
             await msg.reply(BotMsg.invalidAlertChoice(ALERT_TYPES.length + 1));
             return;
         }
 
-        // ============================================================
-        // ✅ v7.1: مرحلة إدخال الكلمة المفتاحية
-        // ============================================================
         if (session.step === 'KEYWORD_INPUT') {
             const plate    = session.alertsPlate    || '---';
             const plateKey = session.alertsPlateKey || '';
 
-            // حذف كلمة: "حذف الرياض" أو "حذف شارع العليا"
             const deleteMatch = text.match(/^حذف\s+(.+)$/);
             if (deleteMatch) {
                 const kwToDelete = deleteMatch[1].trim();
@@ -1021,7 +964,6 @@ client.on('message', async (msg) => {
                     await msg.reply(`❌ الكلمة "${kwToDelete}" غير موجودة في القائمة`);
                 }
                 await sleep(800);
-                // نرجع لقائمة الكلمات
                 const kws = SubscriptionManager.getKeywords(plateKey);
                 const kwListText = kws.length > 0
                     ? '\n\n📋 *الكلمات الحالية:*\n' + kws.map((k, i) => `${i+1}. ${k}`).join('\n')
@@ -1033,7 +975,6 @@ client.on('message', async (msg) => {
                 return;
             }
 
-            // إضافة كلمة جديدة
             const keyword = text.trim();
             if (!keyword || keyword.length < 2) {
                 await msg.reply('❓ الكلمة قصيرة جداً، أرسل كلمة صحيحة أو *إلغاء* للرجوع');
@@ -1041,8 +982,6 @@ client.on('message', async (msg) => {
             }
 
             const added = SubscriptionManager.addKeyword(plateKey, keyword, sessionKey);
-
-            // تأكيد الإضافة وتفعيل الاشتراك في keyword_location تلقائياً
             SubscriptionManager.subscribe(plateKey, 'keyword_location', sessionKey);
 
             const allKws = SubscriptionManager.getKeywords(plateKey);
@@ -1068,25 +1007,18 @@ client.on('message', async (msg) => {
             return;
         }
 
-        // fallback
         Sessions.destroy(sessionKey);
         await msg.reply(BotMsg.cancel());
-
     } catch (err) {
         log('❌ خطأ في معالجة الرسالة:', err.message);
         console.error(err);
     }
 });
 
-// ============================================================
-// SECTION 9: EXPRESS API
-// ============================================================
-
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
-// ── GET / ────────────────────────────────────────────────
 app.get('/', (req, res) => {
     const stats = SubscriptionManager.stats();
     res.json({
@@ -1100,7 +1032,6 @@ app.get('/', (req, res) => {
     });
 });
 
-// ── POST /api/sync ───────────────────────────────────────
 app.post('/api/sync', (req, res) => {
     const { vehicles } = req.body;
     if (!Array.isArray(vehicles))
@@ -1109,10 +1040,6 @@ app.post('/api/sync', (req, res) => {
     res.json({ success: ok, count: FleetState.size() });
 });
 
-// ============================================================
-// ✅ v7.0: POST /api/alert
-// الآن يرسل للمشرف + كل الفروع المشتركة في هذا التنبيه لهذه السيارة
-// ============================================================
 app.post('/api/alert', async (req, res) => {
     if (!isWhatsAppReady)
         return res.json({ success: false, error: 'WhatsApp not ready' });
@@ -1125,10 +1052,8 @@ app.post('/api/alert', async (req, res) => {
 
     const recipients = new Set();
 
-    // 1️⃣ دايماً يوصل للمشرف
     recipients.add(cleanPhone(CONFIG.SUPERVISOR_PHONE));
 
-    // 2️⃣ لو في فرع محدد (targetBranch) ابعت ليه
     if (targetBranch) {
         const targetBranches = Permissions.getBranchesForExcelBranch(targetBranch);
         for (const b of targetBranches) {
@@ -1137,7 +1062,6 @@ app.post('/api/alert', async (req, res) => {
         }
     }
 
-    // 3️⃣ ✅ v7.0: كل الفروع المشتركة في هذا التنبيه لهذه السيارة
     const plateKey = normalize(plate);
     const subscribers = SubscriptionManager.getSubscribersForAlert(plateKey, type);
     for (const subPhone of subscribers) {
@@ -1162,10 +1086,6 @@ app.post('/api/alert', async (req, res) => {
     res.json({ success: successCount > 0, sent: successCount, total: results.length, results });
 });
 
-// ============================================================
-// ✅ v7.0: POST /api/alert/batch
-// نفس الفكرة — كل تنبيه يوصل لمشتركيه + المشرف
-// ============================================================
 app.post('/api/alert/batch', async (req, res) => {
     if (!isWhatsAppReady)
         return res.json({ success: false, error: 'WhatsApp not ready' });
@@ -1187,10 +1107,8 @@ app.post('/api/alert/batch', async (req, res) => {
         const message = ReportBuilder.buildAutomationAlert(alertData);
         const recipients = new Set();
 
-        // 1️⃣ المشرف دايماً
         recipients.add(supervisorPhone);
 
-        // 2️⃣ الفرع المحدد (targetBranch)
         if (targetBranch) {
             const targetBranches = Permissions.getBranchesForExcelBranch(targetBranch);
             for (const b of targetBranches) {
@@ -1199,7 +1117,6 @@ app.post('/api/alert/batch', async (req, res) => {
             }
         }
 
-        // 3️⃣ ✅ v7.0: المشتركون في هذا التنبيه
         const plateKey = normalize(plate);
         const subscribers = SubscriptionManager.getSubscribersForAlert(plateKey, type);
         for (const subPhone of subscribers) {
@@ -1224,7 +1141,6 @@ app.post('/api/alert/batch', async (req, res) => {
     res.json({ success: successCount > 0, sent: successCount, total: allResults.length });
 });
 
-// ── POST /api/dispatch ───────────────────────────────────
 app.post('/api/dispatch', async (req, res) => {
     if (!isWhatsAppReady)
         return res.json({ success: false, error: 'WhatsApp not ready yet' });
@@ -1266,7 +1182,6 @@ app.post('/api/dispatch', async (req, res) => {
     res.json({ success: successCount > 0, dispatched: successCount, total: results.length, results });
 });
 
-// ── GET /api/status ──────────────────────────────────────
 app.get('/api/status', (req, res) => {
     const stats = SubscriptionManager.stats();
     res.json({
@@ -1279,15 +1194,12 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// ── GET /api/vehicle/:plate ──────────────────────────────
 app.get('/api/vehicle/:plate', (req, res) => {
     const v = FleetState.find(req.params.plate);
     if (!v) return res.json({ found: false });
     res.json({ found: true, data: v });
 });
 
-// ── GET /api/subscriptions ───────────────────────────────
-// عرض كل الاشتراكات الحالية
 app.get('/api/subscriptions', (req, res) => {
     res.json({
         success: true,
@@ -1296,16 +1208,12 @@ app.get('/api/subscriptions', (req, res) => {
     });
 });
 
-// ── GET /api/subscriptions/:plate ───────────────────────
-// عرض اشتراكات سيارة معينة
 app.get('/api/subscriptions/:plate', (req, res) => {
     const plateKey  = normalize(req.params.plate);
     const plateData = SubscriptionManager._data[plateKey] || {};
     res.json({ plate: req.params.plate, plateKey, subscriptions: plateData });
 });
 
-// ── DELETE /api/subscriptions/:plate ────────────────────
-// مسح كل اشتراكات سيارة معينة (للإدارة)
 app.delete('/api/subscriptions/:plate', (req, res) => {
     const plateKey = normalize(req.params.plate);
     delete SubscriptionManager._data[plateKey];
@@ -1313,22 +1221,16 @@ app.delete('/api/subscriptions/:plate', (req, res) => {
     res.json({ success: true, message: `تم مسح اشتراكات اللوحة: ${req.params.plate}` });
 });
 
-// ── GET /api/keywords ─────────────────────────────────────
-// ✅ v7.1: السكريبت يجيب الكلمات المفتاحية المضافة من الواتساب
-// { "plateKey": ["الرياض", "العليا", ...], ... }
 app.get('/api/keywords', (req, res) => {
     const allKws = SubscriptionManager.getAllKeywords();
     res.json({ success: true, keywords: allKws, count: Object.keys(allKws).length });
 });
 
-// ── GET /api/keywords/:plate ──────────────────────────────
-// كلمات سيارة معينة
 app.get('/api/keywords/:plate', (req, res) => {
     const kws = SubscriptionManager.getKeywords(req.params.plate);
     res.json({ plate: req.params.plate, keywords: kws });
 });
 
-// ── GET /api/debug/phone/:rawPhone ───────────────────────
 app.get('/api/debug/phone/:rawPhone', (req, res) => {
     const raw    = req.params.rawPhone + '@c.us';
     const branch = Permissions.findBranchByPhone(raw);
@@ -1341,7 +1243,6 @@ app.get('/api/debug/phone/:rawPhone', (req, res) => {
     });
 });
 
-// ── GET /api/debug/lid/:lidNum ────────────────────────────
 app.get('/api/debug/lid/:lidNum', (req, res) => {
     const lidNum = cleanPhone(req.params.lidNum);
     const mapped = LID_MAP[lidNum];
@@ -1357,7 +1258,6 @@ app.get('/api/debug/lid/:lidNum', (req, res) => {
     });
 });
 
-// ── POST /request ────────────────────────────────────────
 app.post('/request', async (req, res) => {
     if (!isWhatsAppReady)
         return res.json({ success: false, error: 'WhatsApp not ready yet' });
@@ -1370,13 +1270,7 @@ app.post('/request', async (req, res) => {
     }
 });
 
-// ============================================================
-// SECTION 10: START
-// ============================================================
-
-// تحميل الاشتراكات المحفوظة عند البدء
 SubscriptionManager.load();
-
 client.initialize();
 
 app.listen(CONFIG.PORT, () => {
@@ -1418,3 +1312,4 @@ app.listen(CONFIG.PORT, () => {
     console.log('⏳ انتظار اتصال WhatsApp...');
     console.log('');
 });
+
