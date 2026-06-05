@@ -10,11 +10,9 @@ const express = require('express');
 const cors    = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode  = require('qrcode-terminal');
-const QRCode  = require('qrcode');
 const fs      = require('fs');
 const path    = require('path');
 
-let lastQR = '';
 // ============================================================
 // SECTION 1: CONFIGURATION
 // ============================================================
@@ -686,49 +684,31 @@ const BotMsg = {
 // SECTION 7: WHATSAPP CLIENT
 // ============================================================
 
-const SESSION_PATH = '/app/.wwebjs_auth';
-
-function clearLocks(dir) {
-    if (!fs.existsSync(dir)) return;
-    try {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) clearLocks(fullPath);
-            else if (entry.name === 'SingletonLock' || entry.name === 'SingletonCookie') {
-                fs.unlinkSync(fullPath);
-                console.log(`🧹 حذف: ${fullPath}`);
-            }
-        }
-    } catch (err) {
-        console.log(`⚠️ clearLocks: ${err.message}`);
-    }
-}
-clearLocks(SESSION_PATH);
-
-// ✅ const client لازم يكون هنا
 const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: SESSION_PATH,
-    }),
+    authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu',
-        ],
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
     },
 });
 
-client.on('qr', (qr) => { ... });
-client.on('ready', () => { ... });
-// إلخ...
+client.on('qr', (qr) => {
+    console.log('\n📌 امسح QR Code للاتصال بـ WhatsApp:\n');
+    qrcode.generate(qr, { small: true });
+});
+
+client.on('ready', () => {
+    console.log('✅ WhatsApp متصل وجاهز!');
+    isWhatsAppReady = true;
+});
+
+client.on('auth_failure', (msg) => console.error('❌ WhatsApp auth failure:', msg));
+
+client.on('disconnected', (reason) => {
+    console.log('❌ WhatsApp انقطع:', reason);
+    isWhatsAppReady = false;
+});
+
 // ============================================================
 // SECTION 8: BOT HANDLER
 // ============================================================
@@ -1106,27 +1086,6 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
-// ── GET /qr ──────────────────────────────────────────────
-app.get('/qr', (req, res) => {
-    res.sendFile(path.join(__dirname, 'qr.html'));
-});
-
-app.get('/qr-image', async (req, res) => {
-    if (!lastQR) return res.status(404).send('no QR');
-
-    const imgData = await QRCode.toDataURL(lastQR, {
-        width: 500,
-        margin: 3,
-        color: { dark: '#000000', light: '#ffffff' },
-    });
-
-    const base64 = imgData.replace('data:image/png;base64,', '');
-    const img = Buffer.from(base64, 'base64');
-
-    res.setHeader('Content-Type', 'image/png');
-    res.send(img);
-});
-
 // ── GET / ────────────────────────────────────────────────
 app.get('/', (req, res) => {
     const stats = SubscriptionManager.stats();
@@ -1140,6 +1099,7 @@ app.get('/', (req, res) => {
         subscriptions: stats,
     });
 });
+
 // ── POST /api/sync ───────────────────────────────────────
 app.post('/api/sync', (req, res) => {
     const { vehicles } = req.body;
@@ -1416,12 +1376,7 @@ app.post('/request', async (req, res) => {
 
 // تحميل الاشتراكات المحفوظة عند البدء
 SubscriptionManager.load();
-// Graceful shutdown عشان Railway
-process.on('SIGTERM', async () => {
-    console.log('🛑 SIGTERM — جاري الإيقاف...');
-    try { await client.destroy(); } catch (_) {}
-    process.exit(0);
-});
+
 client.initialize();
 
 app.listen(CONFIG.PORT, () => {
