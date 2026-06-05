@@ -655,11 +655,13 @@ const BotMsg = {
         `❓ اختيار غير صحيح.\n\nأرسل رقماً من 1 إلى ${maxNum}\nأو *0* للرجوع\nأو *إلغاء* للخروج`,
 };
 
+const { executablePath } = require('puppeteer');
+
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/run/current-system/sw/bin/chromium',
+        executablePath: executablePath(),
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
