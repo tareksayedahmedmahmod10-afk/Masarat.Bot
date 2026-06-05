@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_20", "google-chrome-stable"]
 
 [phases.install]
-cmds = ["npm install", "npx puppeteer browsers install chrome"]
+cmds = ["npm install"]
 
 [start]
 cmd = "node server.js"
